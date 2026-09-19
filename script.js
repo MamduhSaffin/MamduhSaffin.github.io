@@ -29,6 +29,200 @@ document.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
   if (s.textContent && s.textContent.includes(OLD_PHONE)) s.textContent = s.textContent.replaceAll(OLD_PHONE, NEW_PHONE);
 });
 
+/* Current-page search: visible in the header on desktop and mobile. */
+(() => {
+  if (document.getElementById('site-search-open')) return;
+
+  const isArabic = document.documentElement.lang === 'ar' || document.body.classList.contains('rtl');
+  const copy = isArabic ? {
+    open: 'بحث',
+    title: 'البحث في هذه الصفحة',
+    placeholder: 'اكتب كلمة أو عبارة…',
+    previous: 'السابق',
+    next: 'التالي',
+    close: 'إغلاق',
+    empty: 'اكتب للبحث في محتوى هذه الصفحة',
+    noResults: 'لا توجد نتائج'
+  } : {
+    open: 'Search',
+    title: 'Search this page',
+    placeholder: 'Type a word or phrase…',
+    previous: 'Previous',
+    next: 'Next',
+    close: 'Close',
+    empty: 'Type to search the content on this page',
+    noResults: 'No results'
+  };
+
+  const navInner = document.querySelector('.nav-inner');
+  const menuBtn = document.querySelector('.menu-btn');
+  if (!navInner) return;
+
+  const openButton = document.createElement('button');
+  openButton.id = 'site-search-open';
+  openButton.className = 'site-search-open';
+  openButton.type = 'button';
+  openButton.setAttribute('aria-label', copy.title);
+  openButton.innerHTML = `<span aria-hidden="true">⌕</span><b>${copy.open}</b>`;
+  navInner.insertBefore(openButton, menuBtn || null);
+
+  const panel = document.createElement('div');
+  panel.id = 'site-search-panel';
+  panel.className = 'site-search-panel';
+  panel.hidden = true;
+  panel.innerHTML = `
+    <div class="site-search-dialog" role="dialog" aria-modal="true" aria-labelledby="site-search-title">
+      <div class="site-search-top">
+        <div>
+          <div class="site-search-kicker">TGPU GULF ADVISORY</div>
+          <h2 id="site-search-title">${copy.title}</h2>
+        </div>
+        <button class="site-search-close" type="button" aria-label="${copy.close}">×</button>
+      </div>
+      <div class="site-search-form">
+        <span class="site-search-icon" aria-hidden="true">⌕</span>
+        <input id="site-search-input" type="search" autocomplete="off" placeholder="${copy.placeholder}" aria-label="${copy.title}">
+      </div>
+      <div class="site-search-controls">
+        <div id="site-search-status" class="site-search-status">${copy.empty}</div>
+        <div class="site-search-nav">
+          <button id="site-search-prev" type="button" disabled>↑ ${copy.previous}</button>
+          <button id="site-search-next" type="button" disabled>${copy.next} ↓</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(panel);
+
+  const input = panel.querySelector('#site-search-input');
+  const status = panel.querySelector('#site-search-status');
+  const prev = panel.querySelector('#site-search-prev');
+  const next = panel.querySelector('#site-search-next');
+  const close = panel.querySelector('.site-search-close');
+  let hits = [];
+  let activeIndex = -1;
+
+  const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const clearHighlights = () => {
+    document.querySelectorAll('mark.site-search-hit').forEach(mark => {
+      const text = document.createTextNode(mark.textContent || '');
+      mark.replaceWith(text);
+      text.parentNode && text.parentNode.normalize();
+    });
+    hits = [];
+    activeIndex = -1;
+  };
+
+  const updateStatus = () => {
+    if (!input.value.trim()) status.textContent = copy.empty;
+    else if (!hits.length) status.textContent = copy.noResults;
+    else status.textContent = `${activeIndex + 1} / ${hits.length}`;
+    prev.disabled = hits.length < 2;
+    next.disabled = hits.length < 2;
+  };
+
+  const activate = index => {
+    if (!hits.length) return;
+    hits.forEach(hit => hit.classList.remove('active'));
+    activeIndex = (index + hits.length) % hits.length;
+    const current = hits[activeIndex];
+    current.classList.add('active');
+    current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    updateStatus();
+  };
+
+  const runSearch = () => {
+    clearHighlights();
+    const query = input.value.trim();
+    if (!query) {
+      updateStatus();
+      return;
+    }
+
+    const main = document.querySelector('main') || document.body;
+    const textWalker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent || !node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+        if (parent.closest('script,style,noscript,mark,.site-search-panel')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+
+    const textNodes = [];
+    while (textWalker.nextNode()) textNodes.push(textWalker.currentNode);
+    const regex = new RegExp(escapeRegExp(query), 'gi');
+
+    textNodes.forEach(node => {
+      const text = node.nodeValue;
+      if (!regex.test(text)) {
+        regex.lastIndex = 0;
+        return;
+      }
+      regex.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        frag.appendChild(document.createTextNode(text.slice(last, match.index)));
+        const mark = document.createElement('mark');
+        mark.className = 'site-search-hit';
+        mark.textContent = match[0];
+        frag.appendChild(mark);
+        last = match.index + match[0].length;
+        if (hits.length >= 199) break;
+      }
+      frag.appendChild(document.createTextNode(text.slice(last)));
+      node.replaceWith(frag);
+    });
+
+    hits = Array.from(document.querySelectorAll('main mark.site-search-hit'));
+    if (hits.length) activate(0);
+    else updateStatus();
+  };
+
+  const openPanel = () => {
+    panel.hidden = false;
+    document.body.classList.add('site-search-opened');
+    navLinks && navLinks.classList.remove('open');
+    setTimeout(() => input.focus(), 20);
+  };
+
+  const closePanel = () => {
+    panel.hidden = true;
+    document.body.classList.remove('site-search-opened');
+    clearHighlights();
+    input.value = '';
+    updateStatus();
+    openButton.focus();
+  };
+
+  let searchTimer;
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 120);
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (hits.length) activate(activeIndex + (e.shiftKey ? -1 : 1));
+      else runSearch();
+    }
+  });
+  prev.addEventListener('click', () => activate(activeIndex - 1));
+  next.addEventListener('click', () => activate(activeIndex + 1));
+  openButton.addEventListener('click', openPanel);
+  close.addEventListener('click', closePanel);
+  panel.addEventListener('click', e => { if (e.target === panel) closePanel(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !panel.hidden) closePanel();
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      panel.hidden ? openPanel() : closePanel();
+    }
+  });
+})();
+
 (() => {
   const path = location.pathname.replace(/\/+$/, '/') || '/';
   const isMainPage = path === '/' || path === '/ar/';
