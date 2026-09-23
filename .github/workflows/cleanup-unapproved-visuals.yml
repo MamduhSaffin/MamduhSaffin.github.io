@@ -1,0 +1,44 @@
+name: Remove unapproved TGPU Gulf visuals
+
+on:
+  push:
+    paths:
+      - '.github/workflows/cleanup-unapproved-visuals.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Use approved logo only for social sharing
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          approved = 'https://tgpugulf.com/assets/tgpu-gulf-approved.png?v=20260923-approved-logo-only'
+          for p in Path('.').rglob('*.html'):
+              s = p.read_text(encoding='utf-8')
+              s = re.sub(r'https://tgpugulf\.com/assets/(?:tgpu-gulf-advisory-preview|whatsapp-preview)\.jpg(?:\?[^"\']*)?', approved, s)
+              s = re.sub(r'<meta property="og:image:type" content="image/jpeg">\s*', '<meta property="og:image:type" content="image/png">\n', s)
+              s = re.sub(r'<meta property="og:image:width"[^>]*>\s*', '', s)
+              s = re.sub(r'<meta property="og:image:height"[^>]*>\s*', '', s)
+              p.write_text(s, encoding='utf-8')
+          PY
+          git rm -f --ignore-unmatch assets/tgpu-gulf-advisory-preview.jpg assets/whatsapp-preview.jpg
+      - name: Commit cleanup
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No changes needed.'
+            exit 0
+          fi
+          git commit -m 'Remove unapproved TGPU Gulf preview artwork'
+          git push origin HEAD:main
