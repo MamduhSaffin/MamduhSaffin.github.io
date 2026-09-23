@@ -1,0 +1,55 @@
+name: Fix TGPU Gulf social preview metadata
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-social-preview-metadata.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Normalize English and Arabic social preview metadata
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          image = 'https://tgpugulf.com/assets/tgpu-gulf-advisory-preview.jpg?v=20260923-static'
+          for path in [Path('index.html'), Path('ar/index.html')]:
+              text = path.read_text(encoding='utf-8')
+              text = re.sub(r'https://tgpugulf\.com/assets/tgpu-gulf-advisory-preview\.jpg(?:\?v=[^"\s<]+)?', image, text)
+              text = re.sub(r'(<meta property="og:image:width" content=")[^"]+("\s*/?>)', r'\g<1>800\2', text)
+              text = re.sub(r'(<meta property="og:image:height" content=")[^"]+("\s*/?>)', r'\g<1>420\2', text)
+
+              og_image_line = f'<meta property="og:image" content="{image}">'
+              type_line = '<meta property="og:image:type" content="image/jpeg">'
+              if type_line not in text:
+                  text = text.replace(og_image_line, og_image_line + '\n' + type_line)
+
+              twitter_image = f'<meta name="twitter:image" content="{image}">'
+              if twitter_image not in text:
+                  card = '<meta name="twitter:card" content="summary_large_image">'
+                  text = text.replace(card, card + '\n' + twitter_image)
+
+              path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit corrected metadata
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html ar/index.html
+          if git diff --cached --quiet; then
+            echo 'No changes needed.'
+            exit 0
+          fi
+          git commit -m 'Normalize TGPU Gulf social preview metadata'
+          git push
